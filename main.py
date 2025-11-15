@@ -597,6 +597,15 @@ def create_db_server(instance_name: str, subnet_id: str, security_group_id: str,
 def create_all_instances(subnets: dict, security_groups: dict, key_name: str, ubuntu_ami: str= 'ami-0ecb62995f68bb549', windows_ami: str= 'ami-0b4bc1e90f30ca1ec') -> dict:
     
     instances = {}
+
+    print('\n- Creating App Server for AZ1 (polystudent-ec2)...')
+    instances['app_az1'] = create_app_server(
+        instance_name='polystudent-ec2',
+        subnet_id=subnets['public_az1'],
+        security_group_id=security_groups['app'],
+        ami_id=ubuntu_ami,
+        key_name=key_name
+    )
     
     print('\n- [3.1.1] Creating App Server for AZ2...')
     instances['app_az2'] = create_app_server(
