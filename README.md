@@ -21,11 +21,11 @@ Includes VPC configuration, EC2 hardening, network security controls, logging, a
 
 ## Project Structure
 
-aws-cloud-security/<br>
-─ cleanup.py       # Delete used resources on AWS<br>
-─ architecture.png # Secure architecture design<br>
-─ main.py          # EC2 deployment & hardening<br>
-─ README.md
+aws-cloud-security/
+│── cleanup.py       # Delete used resources on AWS<br>
+│── architecture.png # Secure architecture design  <br>
+│── main.py          # EC2 deployment & hardening  <br>
+└── README.md
 
 ## Technologies
 - AWS VPC  
