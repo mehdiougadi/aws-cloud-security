@@ -184,7 +184,6 @@ def delete_route_tables(vpc_id: str):
         )
         
         for rt in response['RouteTables']:
-            # Skip main route table
             is_main = any(assoc.get('Main', False) for assoc in rt.get('Associations', []))
             if not is_main:
                 rt_id = rt['RouteTableId']
@@ -193,16 +192,6 @@ def delete_route_tables(vpc_id: str):
                 
     except Exception as e:
         print(f'  - Error deleting route tables: {e}')
-
-
-def delete_vpc(vpc_id: str):
-    """Delete the VPC"""
-    print('\n- Deleting VPC...')
-    try:
-        EC2_CLIENT.delete_vpc(VpcId=vpc_id)
-        print(f'  - Deleted VPC: {vpc_id}')
-    except Exception as e:
-        print(f'  - Error deleting VPC: {e}')
 
 
 def main():
@@ -221,7 +210,7 @@ def main():
         return
     
     print(f'\n- Found VPC: {vpc_id}')
-    confirm = input(f'\n⚠️  Are you sure you want to delete VPC "{vpc_name}" and all its resources? (yes/no): ').strip().lower()
+    confirm = input('\nAre you sure you want to delete all AWS resources? (yes/no): ').strip().lower()
     
     if confirm != 'yes':
         print('- Cleanup cancelled')
@@ -237,7 +226,6 @@ def main():
     detach_and_delete_igw(vpc_id)
     delete_subnets(vpc_id)
     delete_route_tables(vpc_id)
-    delete_vpc(vpc_id)
     
     print('\n' + '='*70)
     print('CLEANUP COMPLETE')

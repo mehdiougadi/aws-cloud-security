@@ -21,37 +21,6 @@ def read_user_data(filename: str) -> str:
         sys.exit(1)
 
 
-def create_security_group(sgName: str, vpcId: str, ingressRules: list[str], egressRules: list[str],
-                          desc: str = '') -> str:
-    print(f'- creating new security group {sgName}')
-    try:
-        response = EC2_CLIENT.create_security_group(
-            GroupName=sgName,
-            Description=desc,
-            VpcId=vpcId
-        )
-
-        sgId = response['GroupId']
-
-        if ingressRules:
-            EC2_CLIENT.authorize_security_group_ingress(
-                GroupId=sgId,
-                IpPermissions=ingressRules
-            )
-
-        if egressRules:
-            EC2_CLIENT.authorize_security_group_egress(
-                GroupId=sgId,
-                IpPermissions=egressRules
-            )
-
-        print(f'- created security group {sgName} successfully')
-        return sgId
-    except Exception:
-        print(f'- failed to create security group {sgName}')
-        sys.exit(1)
-
-
 """
     AWS SETUP
 """
@@ -128,42 +97,37 @@ def set_clients():
 """
     INFRA
 """
-def create_vpc(vpc_name: str = 'polystudentlab-vpc', cidr_block: str = '10.0.0.0/16') -> str:
-    print(f'- creating VPC {vpc_name} with CIDR {cidr_block}')
+def get_vpc(vpc_id: str) -> str:
+    print(f'- retrieving VPC {vpc_id}')
     try:
-        response = EC2_CLIENT.create_vpc(
-            CidrBlock=cidr_block,
-            TagSpecifications=[
-                {
-                    'ResourceType': 'vpc',
-                    'Tags': [
-                        {'Key': 'Name', 'Value': vpc_name}
-                    ]
-                }
-            ]
+        response = EC2_CLIENT.describe_vpcs(
+            VpcIds=[vpc_id]
         )
         
-        vpc_id = response['Vpc']['VpcId']
-        print(f'- created VPC: {vpc_id}')
-        
-        waiter = EC2_CLIENT.get_waiter('vpc_available')
-        waiter.wait(VpcIds=[vpc_id])
-        
-        EC2_CLIENT.modify_vpc_attribute(
-            VpcId=vpc_id,
-            EnableDnsHostnames={'Value': True}
-        )
-        
-        EC2_CLIENT.modify_vpc_attribute(
-            VpcId=vpc_id,
-            EnableDnsSupport={'Value': True}
-        )
-        
-        print(f'- VPC {vpc_name} configured successfully')
-        return vpc_id
-        
+        if response['Vpcs']:
+            vpc = response['Vpcs'][0]
+            vpc_id = vpc['VpcId']
+            cidr_block = vpc['CidrBlock']
+            print(f'- found VPC: {vpc_id} with CIDR {cidr_block}')
+            
+            EC2_CLIENT.modify_vpc_attribute(
+                VpcId=vpc_id,
+                EnableDnsHostnames={'Value': True}
+            )
+            
+            EC2_CLIENT.modify_vpc_attribute(
+                VpcId=vpc_id,
+                EnableDnsSupport={'Value': True}
+            )
+            
+            print(f'- VPC {vpc_id} configured successfully')
+            return vpc_id
+        else:
+            print(f'- VPC {vpc_id} not found')
+            sys.exit(1)
+            
     except Exception as e:
-        print(f'- error creating VPC: {e}')
+        print(f'- error retrieving VPC: {e}')
         sys.exit(1)
 
 
@@ -202,12 +166,12 @@ def create_subnet(vpc_id: str, cidr_block: str, availability_zone: str, subnet_n
         sys.exit(1)
 
 
-def create_all_subnets(vpc_id: str, region: str = 'ca-central-1') -> dict:
+def create_all_subnets(vpc_id: str, region: str = 'us-east-1') -> dict:
     print('\n- creating all subnets')
     
     subnets = {}
     
-    # AZ1 (ca-central-1a)
+    # AZ1 (us-east-1a)
     subnets['public_az1'] = create_subnet(
         vpc_id=vpc_id,
         cidr_block='10.0.0.0/24',
@@ -224,7 +188,7 @@ def create_all_subnets(vpc_id: str, region: str = 'ca-central-1') -> dict:
         is_public=False
     )
     
-    # AZ2 (ca-central-1b)
+    # AZ2 (us-east-1b)
     subnets['public_az2'] = create_subnet(
         vpc_id=vpc_id,
         cidr_block='10.0.16.0/24',
@@ -241,7 +205,7 @@ def create_all_subnets(vpc_id: str, region: str = 'ca-central-1') -> dict:
         is_public=False
     )
     
-    print(f'- all subnets created successfully')
+    print('- all subnets created successfully')
     print(f'  - Public AZ1: {subnets["public_az1"]}')
     print(f'  - Private AZ1: {subnets["private_az1"]}')
     print(f'  - Public AZ2: {subnets["public_az2"]}')
@@ -633,7 +597,7 @@ def main():
     print('')
     print('*'*26 + ' INFRASTRUCTURE START ' + '*'*26)
     
-    vpc_id = create_vpc()
+    vpc_id = get_vpc('vpc-0bdc139fd9ee529cc')
     subnets = create_all_subnets(vpc_id)
     igw_id = create_internet_gateway(vpc_id)
     configure_route_tables(vpc_id, igw_id, subnets)
