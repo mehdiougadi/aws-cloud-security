@@ -3,10 +3,6 @@
 A practical AWS cloud security project focused on building and securing cloud infrastructure.  
 Includes VPC configuration, EC2 hardening, network security controls, logging, and monitoring.
 
----
-
-## Contents
-
 ### **VPC Security**
 - Network segmentation  
 - Security groups & NACLs  
@@ -23,17 +19,13 @@ Includes VPC configuration, EC2 hardening, network security controls, logging, a
 - Secure AWS architecture design  
 - CloudWatch & CloudTrail monitoring setup  
 
----
-
 ## Project Structure
 
 aws-cloud-security/
-│── q1/   # CSA compliance analysis  
-│── q2/   # Secure architecture design  
-│── q3/   # EC2 deployment & hardening  
+│── cleanup.py       # Delete used resources on AWS
+│── architecture.png # Secure architecture design  
+│── main.py          # EC2 deployment & hardening  
 └── README.md
-
----
 
 ## Technologies
 - AWS VPC  
