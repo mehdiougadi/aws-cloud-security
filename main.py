@@ -553,7 +553,7 @@ def create_db_server(instance_name: str, subnet_id: str, security_group_id: str,
         sys.exit(1)
 
 
-def create_all_instances(subnets: dict, security_groups: dict, ubuntu_ami: str= 'ami-0083d3f8b2a6c7a81', windows_ami: str= 'ami-0f8ca728008ff5af4') -> dict:
+def create_all_instances(subnets: dict, security_groups: dict, ubuntu_ami: str= 'ami-0ecb62995f68bb549', windows_ami: str= 'ami-0b4bc1e90f30ca1ec') -> dict:
     
     instances = {}
     

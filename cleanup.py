@@ -2,6 +2,7 @@ import boto3
 import configparser
 import sys
 import os
+import time
 
 EC2_CLIENT = None
 
@@ -73,14 +74,21 @@ def set_clients():
         sys.exit(1)
 
 
-def get_vpc_id(vpc_name: str = 'polystudentlab-vpc'):
-    """Find VPC by name"""
+def get_vpc_id(vpc_identifier: str):
+    """Find VPC by ID or name"""
     try:
+        if vpc_identifier.startswith('vpc-'):
+            response = EC2_CLIENT.describe_vpcs(VpcIds=[vpc_identifier])
+            if response['Vpcs']:
+                return response['Vpcs'][0]['VpcId']
+        
+        # Try as VPC name
         response = EC2_CLIENT.describe_vpcs(
-            Filters=[{'Name': 'tag:Name', 'Values': [vpc_name]}]
+            Filters=[{'Name': 'tag:Name', 'Values': [vpc_identifier]}]
         )
         if response['Vpcs']:
             return response['Vpcs'][0]['VpcId']
+        
         return None
     except Exception as e:
         print(f'- error finding VPC: {e}')
@@ -102,40 +110,75 @@ def terminate_instances(vpc_id: str):
         for reservation in response['Reservations']:
             for instance in reservation['Instances']:
                 instance_ids.append(instance['InstanceId'])
-                print(f"  - Found instance: {instance['InstanceId']}")
+                instance_name = 'N/A'
+                for tag in instance.get('Tags', []):
+                    if tag['Key'] == 'Name':
+                        instance_name = tag['Value']
+                        break
+                print(f"  - Found instance: {instance['InstanceId']} ({instance_name})")
         
         if instance_ids:
             EC2_CLIENT.terminate_instances(InstanceIds=instance_ids)
             print(f'  - Terminating {len(instance_ids)} instance(s)...')
             
             waiter = EC2_CLIENT.get_waiter('instance_terminated')
+            print('  - Waiting for instances to terminate...')
             waiter.wait(InstanceIds=instance_ids)
-            print('  - All instances terminated')
+            print('All instances terminated')
         else:
             print('  - No instances to terminate')
             
     except Exception as e:
-        print(f'  - Error terminating instances: {e}')
+        print(f'Error terminating instances: {e}')
 
 
 def delete_security_groups(vpc_id: str):
     """Delete all security groups in the VPC (except default)"""
     print('\n- Deleting security groups...')
-    try:
-        response = EC2_CLIENT.describe_security_groups(
-            Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}]
-        )
-        
-        for sg in response['SecurityGroups']:
-            if sg['GroupName'] != 'default':
+    
+    max_retries = 5
+    retry_delay = 3
+    
+    for attempt in range(max_retries):
+        try:
+            response = EC2_CLIENT.describe_security_groups(
+                Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}]
+            )
+            
+            remaining_sgs = [sg for sg in response['SecurityGroups'] if sg['GroupName'] != 'default']
+            
+            if not remaining_sgs:
+                print('All security groups deleted')
+                return
+            
+            deleted_any = False
+            for sg in remaining_sgs:
                 try:
                     EC2_CLIENT.delete_security_group(GroupId=sg['GroupId'])
-                    print(f"  - Deleted security group: {sg['GroupName']} ({sg['GroupId']})")
+                    print(f"Deleted security group: {sg['GroupName']} ({sg['GroupId']})")
+                    deleted_any = True
                 except Exception as e:
-                    print(f"  - Could not delete {sg['GroupName']}: {e}")
+                    if 'DependencyViolation' in str(e):
+                        print(f"  - Skipping {sg['GroupName']} (has dependencies)")
+                    else:
+                        print(f"Could not delete {sg['GroupName']}: {e}")
+            
+            if deleted_any and attempt < max_retries - 1:
+                print(f'  - Waiting {retry_delay}s before retry...')
+                time.sleep(retry_delay)
+        
+        except Exception as e:
+            print(f'Error deleting security groups: {e}')
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
     
-    except Exception as e:
-        print(f'  - Error deleting security groups: {e}')
+    # Check if any remain
+    response = EC2_CLIENT.describe_security_groups(
+        Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}]
+    )
+    remaining = [sg for sg in response['SecurityGroups'] if sg['GroupName'] != 'default']
+    if remaining:
+        print(f'Warning: {len(remaining)} security group(s) could not be deleted')
 
 
 def detach_and_delete_igw(vpc_id: str):
@@ -152,10 +195,13 @@ def detach_and_delete_igw(vpc_id: str):
             print(f'  - Detached IGW: {igw_id}')
             
             EC2_CLIENT.delete_internet_gateway(InternetGatewayId=igw_id)
-            print(f'  - Deleted IGW: {igw_id}')
+            print(f'Deleted IGW: {igw_id}')
+        
+        if not response['InternetGateways']:
+            print('  - No Internet Gateway to delete')
             
     except Exception as e:
-        print(f'  - Error with Internet Gateway: {e}')
+        print(f'Error with Internet Gateway: {e}')
 
 
 def delete_subnets(vpc_id: str):
@@ -166,13 +212,25 @@ def delete_subnets(vpc_id: str):
             Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}]
         )
         
+        if not response['Subnets']:
+            print('  - No subnets to delete')
+            return
+        
         for subnet in response['Subnets']:
             subnet_id = subnet['SubnetId']
+            subnet_name = 'N/A'
+            for tag in subnet.get('Tags', []):
+                if tag['Key'] == 'Name':
+                    subnet_name = tag['Value']
+                    break
+            
             EC2_CLIENT.delete_subnet(SubnetId=subnet_id)
-            print(f"  - Deleted subnet: {subnet_id}")
+            print(f"Deleted subnet: {subnet_id} ({subnet_name})")
+        
+        print(f'Deleted {len(response["Subnets"])} subnet(s)')
             
     except Exception as e:
-        print(f'  - Error deleting subnets: {e}')
+        print(f'Error deleting subnets: {e}')
 
 
 def delete_route_tables(vpc_id: str):
@@ -183,15 +241,28 @@ def delete_route_tables(vpc_id: str):
             Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}]
         )
         
+        deleted_count = 0
         for rt in response['RouteTables']:
             is_main = any(assoc.get('Main', False) for assoc in rt.get('Associations', []))
             if not is_main:
                 rt_id = rt['RouteTableId']
+                rt_name = 'N/A'
+                for tag in rt.get('Tags', []):
+                    if tag['Key'] == 'Name':
+                        rt_name = tag['Value']
+                        break
+                
                 EC2_CLIENT.delete_route_table(RouteTableId=rt_id)
-                print(f'  - Deleted route table: {rt_id}')
+                print(f'Deleted route table: {rt_id} ({rt_name})')
+                deleted_count += 1
+        
+        if deleted_count == 0:
+            print('  - No custom route tables to delete')
+        else:
+            print(f'Deleted {deleted_count} route table(s)')
                 
     except Exception as e:
-        print(f'  - Error deleting route tables: {e}')
+        print(f'Error deleting route tables: {e}')
 
 
 def main():
@@ -202,15 +273,23 @@ def main():
     verify_aws_credentials()
     set_clients()
     
-    vpc_name = 'polystudentlab-vpc'
-    vpc_id = get_vpc_id(vpc_name)
+    vpc_identifier = 'vpc-0bdc139fd9ee529cc'
+    vpc_id = get_vpc_id(vpc_identifier)
     
     if not vpc_id:
-        print(f'\n- VPC "{vpc_name}" not found. Nothing to clean up.')
+        print(f'\n- VPC "{vpc_identifier}" not found. Nothing to clean up.')
         return
     
     print(f'\n- Found VPC: {vpc_id}')
-    confirm = input('\nAre you sure you want to delete all AWS resources? (yes/no): ').strip().lower()
+    
+    print('\nThis will delete:')
+    print('  - All EC2 instances')
+    print('  - All security groups (except default)')
+    print('  - Internet gateways')
+    print('  - All subnets')
+    print('  - All custom route tables')
+    
+    confirm = input('\nAre you SURE you want to delete all resources? (type "yes" to confirm): ').strip()
     
     if confirm != 'yes':
         print('- Cleanup cancelled')
@@ -220,7 +299,6 @@ def main():
     print('STARTING CLEANUP')
     print('='*70)
     
-    # Order matters!
     terminate_instances(vpc_id)
     delete_security_groups(vpc_id)
     detach_and_delete_igw(vpc_id)
@@ -230,6 +308,7 @@ def main():
     print('\n' + '='*70)
     print('CLEANUP COMPLETE')
     print('='*70)
+    print('\nNote: The VPC itself was NOT deleted (it may be managed by your lab)')
 
 
 if __name__ == '__main__':
