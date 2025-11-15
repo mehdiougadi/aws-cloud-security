@@ -1,5 +1,4 @@
 #!/bin/bash
-# Hardened Ubuntu setup for App Server AZ2 with Docker-scan and Trivy
 
 apt update && apt upgrade -y
 apt install -y git
