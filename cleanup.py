@@ -417,7 +417,7 @@ def main():
     print('\n' + '='*70)
     print('CLEANUP COMPLETE')
     print('='*70)
-    print('\nNote: The VPC itself was NOT deleted (it may be managed by your lab)')
+    print('\nNote: The VPC itself was NOT deleted')
 
 
 if __name__ == '__main__':
