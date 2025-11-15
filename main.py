@@ -487,7 +487,7 @@ def create_app_server(instance_name: str, subnet_id: str, security_group_id: str
     print(f'\n- creating App server instance: {instance_name}')
     
     try:
-        user_data = read_user_data('app-server-user-data.tpl')
+        user_data = read_user_data('app-server.tpl')
         
         response = EC2_CLIENT.run_instances(
             ImageId=ami_id,
@@ -525,7 +525,6 @@ def create_app_server(instance_name: str, subnet_id: str, security_group_id: str
         print(f'- created App server instance: {instance_id}')
         print('- waiting for instance to be running...')
         
-        # Wait for instance to be running
         waiter = EC2_CLIENT.get_waiter('instance_running')
         waiter.wait(InstanceIds=[instance_id])
         
@@ -541,7 +540,7 @@ def create_db_server(instance_name: str, subnet_id: str, security_group_id: str,
     print(f'\n- creating DB server instance: {instance_name}')
     
     try:
-        user_data = read_user_data('db-server-user-data.tpl')
+        user_data = read_user_data('db-server.tpl')
         
         response = EC2_CLIENT.run_instances(
             ImageId=ami_id,
@@ -590,6 +589,42 @@ def create_db_server(instance_name: str, subnet_id: str, security_group_id: str,
         sys.exit(1)
 
 
+def create_all_instances(subnets: dict, security_groups: dict, ubuntu_ami: str= 'ami-0083d3f8b2a6c7a81', windows_ami: str= 'ami-0f8ca728008ff5af4') -> dict:
+    
+    instances = {}
+    
+    print('\n- [3.1.1] Creating App Server for AZ2...')
+    instances['app_az2'] = create_app_server(
+        instance_name='polystudent-app-az2',
+        subnet_id=subnets['public_az2'],
+        security_group_id=security_groups['app'],
+        ami_id=ubuntu_ami
+    )
+    
+    print('\n- [3.1.2] Creating DB Server for AZ1...')
+    instances['db_az1'] = create_db_server(
+        instance_name='polystudent-db-az1',
+        subnet_id=subnets['private_az1'],
+        security_group_id=security_groups['db'],
+        ami_id=windows_ami
+    )
+    
+    print('\n[3.1.2] Creating DB Server for AZ2...')
+    instances['db_az2'] = create_db_server(
+        instance_name='polystudent-db-az2',
+        subnet_id=subnets['private_az2'],
+        security_group_id=security_groups['db'],
+        ami_id=windows_ami
+    )
+    
+
+    print(f"- App AZ2: {instances['app_az2']}")
+    print(f"- DB AZ1: {instances['db_az1']}")
+    print(f"- DB AZ2: {instances['db_az2']}")
+    
+    return instances
+
+
 def main():
     print('*'*26 + ' BEGINNING AWS SETUP ' + '*'*26)
     verify_aws_credentials()
@@ -597,6 +632,17 @@ def main():
     print('*'*26 + '*********************' + '*'*26)
     print('')
     print('*'*26 + ' INFRASTRUCTURE START ' + '*'*26)
+    
+    vpc_id = create_vpc()
+    subnets = create_all_subnets(vpc_id)
+    igw_id = create_internet_gateway(vpc_id)
+    configure_route_tables(vpc_id, igw_id, subnets)
+    security_groups = create_security_groups(vpc_id)
+    
+    # Question 3.1
+    create_all_instances(subnets, security_groups)
+    
+    print('*'*26 + '*********************' + '*'*26)
 
 
 if __name__ == '__main__':
