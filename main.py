@@ -362,6 +362,234 @@ def configure_route_tables(vpc_id: str, igw_id: str, subnets: dict) -> dict:
     return route_tables
 
 
+def create_app_security_group(vpc_id: str, sg_name: str = 'polystudentlab-app-sg') -> str:
+    print(f'\n- creating App server security group {sg_name}')
+    
+    try:
+        response = EC2_CLIENT.create_security_group(
+            GroupName=sg_name,
+            Description='Security group for App servers - allows SSH, HTTP, HTTPS, OSSEC, and Elasticsearch',
+            VpcId=vpc_id,
+            TagSpecifications=[
+                {
+                    'ResourceType': 'security-group',
+                    'Tags': [
+                        {'Key': 'Name', 'Value': sg_name},
+                        {'Key': 'Type', 'Value': 'App-Server'}
+                    ]
+                }
+            ]
+        )
+        
+        sg_id = response['GroupId']
+        print(f'- created App security group: {sg_id}')
+        
+        ingress_rules = [
+            {'IpProtocol': 'tcp', 'FromPort': 22, 'ToPort': 22, 'CidrIp': '0.0.0.0/0', 'Description': 'SSH'},
+            {'IpProtocol': 'tcp', 'FromPort': 80, 'ToPort': 80, 'CidrIp': '0.0.0.0/0', 'Description': 'HTTP'},
+            {'IpProtocol': 'tcp', 'FromPort': 443, 'ToPort': 443, 'CidrIp': '0.0.0.0/0', 'Description': 'HTTPS'},
+            {'IpProtocol': 'tcp', 'FromPort': 1514, 'ToPort': 1514, 'CidrIp': '0.0.0.0/0', 'Description': 'OSSEC'},
+            {'IpProtocol': 'tcp', 'FromPort': 9200, 'ToPort': 9300, 'CidrIp': '0.0.0.0/0', 'Description': 'Elasticsearch'},
+        ]
+        
+        for rule in ingress_rules:
+            EC2_CLIENT.authorize_security_group_ingress(
+                GroupId=sg_id,
+                IpPermissions=[{
+                    'IpProtocol': rule['IpProtocol'],
+                    'FromPort': rule['FromPort'],
+                    'ToPort': rule['ToPort'],
+                    'IpRanges': [{'CidrIp': rule['CidrIp'], 'Description': rule['Description']}]
+                }]
+            )
+            print(f'- added ingress rule: {rule["Description"]} ({rule["IpProtocol"]} port {rule["FromPort"]}-{rule["ToPort"]})')
+        
+        print(f'- App security group {sg_name} configured successfully')
+        
+        return sg_id
+        
+    except Exception as e:
+        print(f'- error creating App security group: {e}')
+        sys.exit(1)
+
+
+def create_db_security_group(vpc_id: str, app_sg_id: str, sg_name: str = 'polystudentlab-db-sg') -> str:
+    print(f'\n- creating DB server security group {sg_name}')
+    
+    try:
+        response = EC2_CLIENT.create_security_group(
+            GroupName=sg_name,
+            Description='Security group for DB servers - only accessible from App servers',
+            VpcId=vpc_id,
+            TagSpecifications=[
+                {
+                    'ResourceType': 'security-group',
+                    'Tags': [
+                        {'Key': 'Name', 'Value': sg_name},
+                        {'Key': 'Type', 'Value': 'DB-Server'}
+                    ]
+                }
+            ]
+        )
+        
+        sg_id = response['GroupId']
+        print(f'- created DB security group: {sg_id}')
+        
+        ingress_rules = [
+            {'IpProtocol': 'tcp', 'FromPort': 3306, 'ToPort': 3306, 'Description': 'MySQL from App servers'},
+            {'IpProtocol': 'tcp', 'FromPort': 1433, 'ToPort': 1433, 'Description': 'MSSQL from App servers'},
+            {'IpProtocol': 'tcp', 'FromPort': 5432, 'ToPort': 5432, 'Description': 'PostgreSQL from App servers'},
+            {'IpProtocol': 'tcp', 'FromPort': 3389, 'ToPort': 3389, 'Description': 'RDP from App servers'},
+            {'IpProtocol': 'tcp', 'FromPort': 1514, 'ToPort': 1514, 'Description': 'OSSEC from App servers'},
+        ]
+        
+        for rule in ingress_rules:
+            EC2_CLIENT.authorize_security_group_ingress(
+                GroupId=sg_id,
+                IpPermissions=[{
+                    'IpProtocol': rule['IpProtocol'],
+                    'FromPort': rule['FromPort'],
+                    'ToPort': rule['ToPort'],
+                    'UserIdGroupPairs': [{'GroupId': app_sg_id, 'Description': rule['Description']}]
+                }]
+            )
+            print(f'- added ingress rule: {rule["Description"]} ({rule["IpProtocol"]} port {rule["FromPort"]}-{rule["ToPort"]})')
+        
+        print(f'- DB security group {sg_name} configured successfully')
+        print('- DB servers are ONLY accessible from App servers')
+        
+        return sg_id
+        
+    except Exception as e:
+        print(f'- error creating DB security group: {e}')
+        sys.exit(1)
+
+
+def create_security_groups(vpc_id: str) -> dict:
+    print('\n- Creating Security groups')
+    
+    security_groups = {}
+    
+    app_sg_id = create_app_security_group(vpc_id)
+    security_groups['app'] = app_sg_id
+    
+    db_sg_id = create_db_security_group(vpc_id, app_sg_id)
+    security_groups['db'] = db_sg_id
+    
+    print('\n- Security groups created successfully:')
+    print(f'  - App SG: {app_sg_id} (public access)')
+    print(f'  - DB SG: {db_sg_id} (only accessible from App servers)')
+    
+    return security_groups
+
+
+def create_app_server(instance_name: str, subnet_id: str, security_group_id: str, ami_id: str, key_name: str = 'polystudent-keypair', iam_profile: str = 'LabInstanceProfile') -> str:
+    print(f'\n- creating App server instance: {instance_name}')
+    
+    try:
+        user_data = read_user_data('app-server-user-data.tpl')
+        
+        response = EC2_CLIENT.run_instances(
+            ImageId=ami_id,
+            InstanceType='t2.micro',
+            KeyName=key_name,
+            SecurityGroupIds=[security_group_id],
+            SubnetId=subnet_id,
+            UserData=user_data,
+            IamInstanceProfile={'Name': iam_profile},
+            BlockDeviceMappings=[
+                {
+                    'DeviceName': '/dev/sda1',
+                    'Ebs': {
+                        'VolumeSize': 80,
+                        'VolumeType': 'gp3',
+                        'DeleteOnTermination': True
+                    }
+                }
+            ],
+            Monitoring={'Enabled': True},
+            TagSpecifications=[
+                {
+                    'ResourceType': 'instance',
+                    'Tags': [
+                        {'Key': 'Name', 'Value': instance_name},
+                        {'Key': 'Type', 'Value': 'App-Server'}
+                    ]
+                }
+            ],
+            MinCount=1,
+            MaxCount=1
+        )
+        
+        instance_id = response['Instances'][0]['InstanceId']
+        print(f'- created App server instance: {instance_id}')
+        print('- waiting for instance to be running...')
+        
+        # Wait for instance to be running
+        waiter = EC2_CLIENT.get_waiter('instance_running')
+        waiter.wait(InstanceIds=[instance_id])
+        
+        print(f'- App server {instance_name} is now running')
+        return instance_id
+        
+    except Exception as e:
+        print(f'- error creating App server: {e}')
+        sys.exit(1)
+
+
+def create_db_server(instance_name: str, subnet_id: str, security_group_id: str, ami_id: str, key_name: str = 'polystudent-keypair', iam_profile: str = 'LabInstanceProfile') -> str:
+    print(f'\n- creating DB server instance: {instance_name}')
+    
+    try:
+        user_data = read_user_data('db-server-user-data.tpl')
+        
+        response = EC2_CLIENT.run_instances(
+            ImageId=ami_id,
+            InstanceType='t2.micro',
+            KeyName=key_name,
+            SecurityGroupIds=[security_group_id],
+            SubnetId=subnet_id,
+            UserData=user_data,
+            IamInstanceProfile={'Name': iam_profile},
+            BlockDeviceMappings=[
+                {
+                    'DeviceName': '/dev/sda1',
+                    'Ebs': {
+                        'VolumeSize': 30,
+                        'VolumeType': 'gp3',
+                        'DeleteOnTermination': True
+                    }
+                }
+            ],
+            Monitoring={'Enabled': True},
+            TagSpecifications=[
+                {
+                    'ResourceType': 'instance',
+                    'Tags': [
+                        {'Key': 'Name', 'Value': instance_name},
+                        {'Key': 'Type', 'Value': 'DB-Server'}
+                    ]
+                }
+            ],
+            MinCount=1,
+            MaxCount=1
+        )
+        
+        instance_id = response['Instances'][0]['InstanceId']
+        print(f'- created DB server instance: {instance_id}')
+        print('- waiting for instance to be running...')
+        
+        waiter = EC2_CLIENT.get_waiter('instance_running')
+        waiter.wait(InstanceIds=[instance_id])
+        
+        print(f'- DB server {instance_name} is now running')
+        return instance_id
+        
+    except Exception as e:
+        print(f'- error creating DB server: {e}')
+        sys.exit(1)
+
+
 def main():
     print('*'*26 + ' BEGINNING AWS SETUP ' + '*'*26)
     verify_aws_credentials()
