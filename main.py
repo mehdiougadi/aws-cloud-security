@@ -447,6 +447,47 @@ def create_security_groups(vpc_id: str) -> dict:
     return security_groups
 
 
+def create_or_get_key_pair(key_name: str = 'polystudent-keypair') -> str:
+    print(f'\n- Checking for key pair {key_name}')
+    try:
+        EC2_CLIENT.describe_key_pairs(KeyNames=[key_name])
+        print(f'- Key pair {key_name} already exists')
+        return key_name
+    except:
+        print(f'- Creating new key pair {key_name}')
+        try:
+            response = EC2_CLIENT.create_key_pair(
+                KeyName=key_name,
+                TagSpecifications=[
+                    {
+                        'ResourceType': 'key-pair',
+                        'Tags': [
+                            {'Key': 'Name', 'Value': key_name}
+                        ]
+                    }
+                ]
+            )
+            
+            key_material = response['KeyMaterial']
+            key_file = f'{key_name}.pem'
+            
+            with open(key_file, 'w') as f:
+                f.write(key_material)
+            
+            import platform
+            if platform.system() != 'Windows':
+                os.chmod(key_file, 0o400)
+            
+            print(f'- Created key pair {key_name}')
+            print(f'- Private key saved to {key_file}')
+            
+            return key_name
+            
+        except Exception as e:
+            print(f'- Error creating key pair: {e}')
+            sys.exit(1)
+
+
 def create_app_server(instance_name: str, subnet_id: str, security_group_id: str, ami_id: str, key_name: str = 'polystudent-keypair', iam_profile: str = 'LabInstanceProfile') -> str:
     print(f'\n- creating App server instance: {instance_name}')
     
@@ -508,7 +549,7 @@ def create_db_server(instance_name: str, subnet_id: str, security_group_id: str,
         
         response = EC2_CLIENT.run_instances(
             ImageId=ami_id,
-            InstanceType='t2.micro',
+            InstanceType='t3.micro',
             KeyName=key_name,
             SecurityGroupIds=[security_group_id],
             SubnetId=subnet_id,
@@ -553,7 +594,7 @@ def create_db_server(instance_name: str, subnet_id: str, security_group_id: str,
         sys.exit(1)
 
 
-def create_all_instances(subnets: dict, security_groups: dict, ubuntu_ami: str= 'ami-0ecb62995f68bb549', windows_ami: str= 'ami-0b4bc1e90f30ca1ec') -> dict:
+def create_all_instances(subnets: dict, security_groups: dict, key_name: str, ubuntu_ami: str= 'ami-0ecb62995f68bb549', windows_ami: str= 'ami-0b4bc1e90f30ca1ec') -> dict:
     
     instances = {}
     
@@ -562,7 +603,8 @@ def create_all_instances(subnets: dict, security_groups: dict, ubuntu_ami: str= 
         instance_name='polystudent-app-az2',
         subnet_id=subnets['public_az2'],
         security_group_id=security_groups['app'],
-        ami_id=ubuntu_ami
+        ami_id=ubuntu_ami,
+        key_name=key_name
     )
     
     print('\n- [3.1.2] Creating DB Server for AZ1...')
@@ -570,7 +612,8 @@ def create_all_instances(subnets: dict, security_groups: dict, ubuntu_ami: str= 
         instance_name='polystudent-db-az1',
         subnet_id=subnets['private_az1'],
         security_group_id=security_groups['db'],
-        ami_id=windows_ami
+        ami_id=windows_ami,
+        key_name=key_name
     )
     
     print('\n[3.1.2] Creating DB Server for AZ2...')
@@ -578,7 +621,8 @@ def create_all_instances(subnets: dict, security_groups: dict, ubuntu_ami: str= 
         instance_name='polystudent-db-az2',
         subnet_id=subnets['private_az2'],
         security_group_id=security_groups['db'],
-        ami_id=windows_ami
+        ami_id=windows_ami,
+        key_name=key_name
     )
     
 
@@ -598,13 +642,14 @@ def main():
     print('*'*26 + ' INFRASTRUCTURE START ' + '*'*26)
     
     vpc_id = get_vpc('vpc-0bdc139fd9ee529cc')
+    key_name = create_or_get_key_pair('polystudent-keypair')
     subnets = create_all_subnets(vpc_id)
     igw_id = create_internet_gateway(vpc_id)
     configure_route_tables(vpc_id, igw_id, subnets)
     security_groups = create_security_groups(vpc_id)
     
     # Question 3.1
-    create_all_instances(subnets, security_groups)
+    create_all_instances(subnets, security_groups, key_name)
     
     print('*'*26 + '*********************' + '*'*26)
 
