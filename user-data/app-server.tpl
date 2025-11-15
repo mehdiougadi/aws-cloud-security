@@ -17,13 +17,30 @@ systemctl enable docker
 systemctl start docker
 
 # Install Trivy
-apt-get install -y wget apt-transport-https gnupg lsb-release
-wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | apt-key add -
-echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | tee -a /etc/apt/sources.list.d/trivy.list
-apt-get update
-apt-get install -y trivy
+snap install trivy
 
 docker pull python:slim-buster
 trivy image --format json --output /home/ubuntu/cve.json python:slim-buster
 
+# Install OSSEC
+docker run -d \
+  --name ossec-server \
+  -p 1514:1514/udp \
+  -p 1515:1515 \
+  -p 514:514/udp \
+  -p 55000:55000 \
+  atomicorp/ossec-docker
+
+# Install Elasticsearch
+docker run -d \
+  --name elasticsearch \
+  -p 9200:9200 \
+  -p 9300:9300 \
+  -e "discovery.type=single-node" \
+  -e "xpack.security.enabled=false" \
+  -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
+  docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+
 echo "App Server setup completed" > /home/ubuntu/init-complete.log
+echo "OSSEC Manager running on port 1514" >> /home/ubuntu/init-complete.log
+echo "Elasticsearch running on port 9200" >> /home/ubuntu/init-complete.log
