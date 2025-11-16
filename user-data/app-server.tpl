@@ -32,14 +32,14 @@ docker run -d \
   atomicorp/ossec-docker
 
 # Install Elasticsearch
-docker run -d \
+sudo docker run -d \
   --name elasticsearch \
   -p 9200:9200 \
   -p 9300:9300 \
   -e "discovery.type=single-node" \
   -e "xpack.security.enabled=false" \
-  -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
-  docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+  -e "ES_JAVA_OPTS=-Xms256m -Xmx256m" \
+  docker.elastic.co/elasticsearch/elasticsearch:7.17.10
 
 echo "App Server setup completed" > /home/ubuntu/init-complete.log
 echo "OSSEC Manager running on port 1514" >> /home/ubuntu/init-complete.log
