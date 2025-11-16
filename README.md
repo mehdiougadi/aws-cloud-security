@@ -19,7 +19,10 @@ Includes VPC configuration, EC2 hardening, network security controls, logging, a
 - Secure AWS architecture design  
 - CloudWatch & CloudTrail monitoring setup  
 
-![Architecture](./aws_architecture.png)
+<p style="background-color: white; padding: 10px; display: inline-block;">
+  <img src="./aws_architecture.png" alt="Architecture" width="500">
+</p>
+
 
 ## Project Structure
 
