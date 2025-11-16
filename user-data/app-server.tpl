@@ -40,7 +40,3 @@ sudo docker run -d \
   -e "xpack.security.enabled=false" \
   -e "ES_JAVA_OPTS=-Xms256m -Xmx256m" \
   docker.elastic.co/elasticsearch/elasticsearch:7.17.10
-
-echo "App Server setup completed" > /home/ubuntu/init-complete.log
-echo "OSSEC Manager running on port 1514" >> /home/ubuntu/init-complete.log
-echo "Elasticsearch running on port 9200" >> /home/ubuntu/init-complete.log
